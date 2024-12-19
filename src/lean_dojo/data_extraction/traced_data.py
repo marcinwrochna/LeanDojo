@@ -926,7 +926,7 @@ class TracedFile:
         lean_path = to_lean_path(root_dir, path)
         lean_file = LeanFile(root_dir, lean_path)
 
-        tree = etree.parse(path).getroot()
+        tree = etree.parse(path, etree.XMLParser(huge_tree=True)).getroot()
         assert tree.tag == "TracedFile"
         assert tree.attrib["path"] == str(lean_path)
         assert tree.attrib["md5"] == compute_md5(lean_file.abs_path)
