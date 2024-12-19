@@ -229,7 +229,7 @@ LeanDojo's behavior can be configured through the following environment variable
 * :code:`CACHE_DIR`: Cache directory (see :ref:`caching`). Default to :file:`~/.cache/lean_dojo`.
 * :code:`DISABLE_REMOTE_CACHE`: Whether to disable remote caching and build all repos locally. Not set by default.
 * :code:`TMP_DIR`: Temporary directory used by LeanDojo for storing intermediate files. Default to the systems' global temporary directory.
-* :code:`NUM_PROCS`: Number of parallel processes for data extraction. Default to 32 or the number of CPUs (whichever is smaller).
+* :code:`NUM_PROCS`: Number of parallel worker processes or lean threads for data extraction. Default to 32 or the number of CPUs (whichever is smaller).
 * :code:`TACTIC_TIMEOUT`: Maximum time (in milliseconds) before interrupting a tactic when interacting with Lean (only applicable to Lean 3). Default to 5000.
 * :code:`TACTIC_CPU_LIMIT`: Number of CPUs for executing tactics when interacting with Lean. Default to 1.
 * :code:`TACTIC_MEMORY_LIMIT`: Maximum memory when interacting with Lean. Default to 16 GB.

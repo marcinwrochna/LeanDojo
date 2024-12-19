@@ -44,7 +44,7 @@ TMP_DIR = Path(os.environ["TMP_DIR"]).absolute() if "TMP_DIR" in os.environ else
 MAX_NUM_PROCS = 32
 
 NUM_PROCS = int(os.getenv("NUM_PROCS", min(multiprocessing.cpu_count(), MAX_NUM_PROCS)))
-"""Number of processes to use
+"""Number of worker processes or lean threads to use
 """
 
 NUM_WORKERS = NUM_PROCS - 1
