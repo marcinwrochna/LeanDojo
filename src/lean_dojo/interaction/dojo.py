@@ -49,12 +49,13 @@ class ProofFinished:
 
 @dataclass(frozen=True)
 class ProofGivenUp:
-    pass
+    message: Optional[str] = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)
 class LeanError:
     error: str
+    message: Optional[str] = field(default=None, compare=False)
 
 
 TacticResult = Union[
@@ -179,7 +180,8 @@ class Dojo:
 
         # Get the initial tactic state.
         try:
-            res = json.loads(self._read_next_line()[0])
+            res_json, msg = self._read_next_line()
+            res = json.loads(res_json)
         except Exception as ex:
             if traced_file.has_prelude:
                 raise DojoInitError(
@@ -200,6 +202,7 @@ class Dojo:
             init_state: State = TacticState(
                 self._post_process(res["tacticState"]),
                 res["sid"],
+                message=msg
             )
         else:
             assert self.uses_commands
@@ -327,9 +330,9 @@ class Dojo:
 
         if res["error"] is not None:
             if "proof contains `sorry`" in res["error"]:
-                return ProofGivenUp()
+                return ProofGivenUp(message=res.get("message"))
             else:
-                return LeanError(res["error"].strip())
+                return LeanError(res["error"].strip(), message=res.get("message"))
         elif res["tacticState"] == "no goals":
             self.is_successful = True
             return ProofFinished(res["sid"], res["message"])
@@ -374,8 +377,8 @@ class Dojo:
         self.proc.sendline(req)
         try:
             res, msg = self._read_next_line()
-        except EOFError:
-            raise DojoCrashError("Unexpected EOF")
+        except EOFError as e:
+            raise DojoCrashError(f"Unexpected EOF; message='''{e.args[0]}'''")
         try:
             result: Dict[str, Any] = json.loads(res)
         except json.decoder.JSONDecodeError:
@@ -412,7 +415,7 @@ class Dojo:
                 index = self.proc.expect(["\n", f"{_REPL_PROMPT}.*?\n"])
                 if index == 0:
                     if self.proc.before == "":
-                        raise EOFError
+                        raise EOFError("\n".join(msg) + self.proc.before)
                     else:
                         msg.append(self.proc.before.strip())
                         continue
@@ -420,7 +423,7 @@ class Dojo:
                 res = self.proc.match.string[len(_REPL_PROMPT) :].strip()
                 return res, "\n".join(msg) + self.proc.before
             except pexpect.EOF:
-                raise EOFError
+                raise EOFError("\n".join(msg) + self.proc.before)
             except pexpect.TIMEOUT:
                 logger.debug(f"Tactic timed out")
                 self.has_timedout = True
