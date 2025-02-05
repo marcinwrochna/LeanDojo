@@ -1,4 +1,4 @@
-"""Constants controlling LeanDojo's behaviors. 
+"""Constants controlling LeanDojo's behaviors.
 Many of them are configurable via :ref:`environment-variables`.
 """
 
@@ -7,8 +7,9 @@ import re
 import sys
 import subprocess
 import multiprocessing
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple
+from typing import Tuple, Literal
 from loguru import logger
 from dotenv import load_dotenv
 
@@ -22,53 +23,76 @@ if "VERBOSE" in os.environ or "DEBUG" in os.environ:
 else:
     logger.add(sys.stderr, level="INFO")
 
-CACHE_DIR = (
-    Path(os.environ["CACHE_DIR"])
-    if "CACHE_DIR" in os.environ
-    else Path.home() / ".cache/lean_dojo"
-).absolute()
-"""Cache directory for storing traced repos (see :ref:`caching`).
-"""
 
-REMOTE_CACHE_URL = "https://dl.fbaipublicfiles.com/lean-dojo"
-"""URL of the remote cache (see :ref:`caching`)."""
+def _is_true_str(s: str) -> bool:
+    return s.lower() not in ["false", "0", "no", "f", "n"]
 
-DISABLE_REMOTE_CACHE = "DISABLE_REMOTE_CACHE" in os.environ
-"""Whether to disable remote caching (see :ref:`caching`) and build all repos locally.
-"""
 
-TMP_DIR = Path(os.environ["TMP_DIR"]).absolute() if "TMP_DIR" in os.environ else None
-"""Temporary directory used by LeanDojo for storing intermediate files
-"""
+@dataclass
+class Config:
+    MAX_DEFAULT_NUM_PROCS = 32
 
-MAX_NUM_PROCS = 32
+    cache_dir: Path = Path(
+        os.environ.get("CACHE_DIR", "~/.cache/lean_dojo")
+    ).expanduser()
+    """Cache directory for storing traced repos (see :ref:`caching`)."""
 
-NUM_PROCS = int(os.getenv("NUM_PROCS", min(multiprocessing.cpu_count(), MAX_NUM_PROCS)))
-"""Number of worker processes or lean threads to use
-"""
+    remote_cache_url: str = "https://dl.fbaipublicfiles.com/lean-dojo"
+    """URL of the remote cache (see :ref:`caching`)."""
 
-NUM_WORKERS = NUM_PROCS - 1
+    disable_remote_cache: bool = _is_true_str(
+        os.environ.get("DISABLE_REMOTE_CACHE", "0")
+    )
+    """Whether to disable remote caching (see :ref:`caching`) and build all repos locally."""
 
-LEAN4_URL = "https://github.com/leanprover/lean4"
-"""The URL of the Lean 4 repo."""
+    tmp_dir: Path | Literal[False] = (
+        Path(os.environ["TMP_DIR"]) if "TMP_DIR" in os.environ else False
+    )
+    """Temporary directory used by LeanDojo for storing intermediate files."""
 
-LEAN4_PACKAGES_DIR = Path(".lake/packages")
-"""The directory where Lean 4 dependencies are stored (since v4.3.0-rc2)."""
+    num_procs: int = int(
+        os.environ.get(
+            "NUM_PROCS",
+            min(multiprocessing.cpu_count(), MAX_DEFAULT_NUM_PROCS),
+        )
+    )
+    """Number of worker processes or lean threads to use."""
 
-LOAD_USED_PACKAGES_ONLY = "LOAD_USED_PACKAGES_ONLY" in os.environ
-"""Only load depdendency files that are actually used by the target repo."""
+    num_lean_threads: int = 0
+    """Number of Lean threads to use during tracing or running a dojo env. Zero means num_procs."""
 
-LEAN4_BUILD_DIR = Path(".lake/build")
+    num_ray_actors: int = 0
+    """Number of Ray actors to use when tracing. Zero means num_procs."""
 
-TACTIC_CPU_LIMIT = int(os.getenv("TACTIC_CPU_LIMIT", 1))
-"""Number of CPUs for executing tactics when interacting with Lean.
-"""
+    lean4_url: str = "https://github.com/leanprover/lean4"
+    """The URL of the Lean 4 repo."""
 
-TACTIC_MEMORY_LIMIT = os.getenv("TACTIC_MEMORY_LIMIT", "32g")
-"""Maximum memory when interacting with Lean.
-"""
+    lean4_packages_dir: Path = Path(".lake/packages")  # (since v4.3.0-rc2)
+    """The directory where Lean 4 dependencies are stored."""
 
-assert re.fullmatch(r"\d+g", TACTIC_MEMORY_LIMIT)
+    load_used_packages_only: bool = _is_true_str(
+        os.environ.get("LOAD_USED_PACKAGES_ONLY", "0")
+    )
+    """Only load depdendency files that are actually used by the target repo."""
+
+    lean4_build_dir: Path = Path(".lake/build")
+
+    tactic_cpu_limit: int = int(os.environ.get("TACTIC_CPU_LIMIT", 1))
+    """Number of CPUs for executing tactics when interacting with Lean."""
+
+    tactic_memory_limit: str = os.environ.get("TACTIC_MEMORY_LIMIT", "32g")
+    """Maximum memory when interacting with Lean."""
+
+    def __post_init__(self):
+        assert re.fullmatch(r"\d+g", self.tactic_memory_limit)
+
+        if self.num_lean_threads == 0:
+            self.num_lean_threads = self.num_procs
+
+        if self.num_ray_actors == 0:
+            self.num_ray_actors = self.num_procs
+
+        check_git_version((2, 25, 0))
 
 
 def check_git_version(min_version: Tuple[int, int, int]) -> None:
@@ -83,9 +107,8 @@ def check_git_version(min_version: Tuple[int, int, int]) -> None:
     version = tuple(int(_) for _ in m.group(1).split("."))
     version_str = ".".join(str(_) for _ in version)
     min_version_str = ".".join(str(_) for _ in min_version)
-    assert (
-        version >= min_version
-    ), f"Git version {version_str} is too old. Please upgrade to at least {min_version_str}."
+    assert version >= min_version, (
+        f"Git version {version_str} is too old. Please upgrade to at least {min_version_str}."
+    )
 
-
-check_git_version((2, 25, 0))
+global_config = Config()

@@ -15,11 +15,7 @@ from ..utils import (
     url_exists,
     report_critical_failure,
 )
-from ..constants import (
-    CACHE_DIR,
-    DISABLE_REMOTE_CACHE,
-    REMOTE_CACHE_URL,
-)
+from ..constants import global_config
 
 
 _CACHE_CORRPUTION_MSG = "The cache may have been corrputed!"
@@ -29,17 +25,16 @@ _CACHE_CORRPUTION_MSG = "The cache may have been corrputed!"
 class Cache:
     """Cache manager."""
 
-    cache_dir: Path
     lock: FileLock = field(init=False, repr=False)
 
     def __iter__(self) -> Generator[Path, None, None]:
         """Iterate over all traced repos in the cache."""
-        yield from self.cache_dir.glob("*")
+        yield from global_config.cache_dir.glob("*")
 
     def __post_init__(self):
-        if not os.path.exists(self.cache_dir):
-            self.cache_dir.mkdir(parents=True)
-        lock_path = self.cache_dir.with_suffix(".lock")
+        if not os.path.exists(global_config.cache_dir):
+            global_config.cache_dir.mkdir(parents=True)
+        lock_path = global_config.cache_dir.with_suffix(".lock")
         object.__setattr__(self, "lock", FileLock(lock_path))
 
     def get(self, rel_cache_dir: Path) -> Optional[Path]:
@@ -49,16 +44,16 @@ class Cache:
             rel_cache_dir (Path): The relative path of the stored repo in the cache.
         """
         dirname = rel_cache_dir.parent
-        dirpath = self.cache_dir / dirname
-        cache_path = self.cache_dir / rel_cache_dir
+        dirpath = global_config.cache_dir / dirname
+        cache_path = global_config.cache_dir / rel_cache_dir
 
         with self.lock:
             if dirpath.exists():
                 assert cache_path.exists()
                 return cache_path
 
-            elif not DISABLE_REMOTE_CACHE:
-                url = os.path.join(REMOTE_CACHE_URL, f"{dirname}.tar.gz")
+            elif not global_config.disable_remote_cache:
+                url = os.path.join(global_config.remote_cache_url, f"{dirname}.tar.gz")
                 if not url_exists(url):
                     return None
                 logger.info(
@@ -68,7 +63,7 @@ class Cache:
 
                 with report_critical_failure(_CACHE_CORRPUTION_MSG):
                     with tarfile.open(f"{dirpath}.tar.gz") as tar:
-                        tar.extractall(self.cache_dir)
+                        tar.extractall(global_config.cache_dir)
                     os.remove(f"{dirpath}.tar.gz")
                     assert (cache_path).exists()
 
@@ -84,8 +79,8 @@ class Cache:
             src (Path): Path to the repo.
             rel_cache_dir (Path): The relative path of the stored repo in the cache.
         """
-        dirpath = self.cache_dir / rel_cache_dir.parent
-        cache_path = self.cache_dir / rel_cache_dir
+        dirpath = global_config.cache_dir / rel_cache_dir.parent
+        cache_path = global_config.cache_dir / rel_cache_dir
         if not dirpath.exists():
             with self.lock:
                 with report_critical_failure(_CACHE_CORRPUTION_MSG):
@@ -93,6 +88,6 @@ class Cache:
         return cache_path
 
 
-cache = Cache(CACHE_DIR)
+cache = Cache()
 """A global :class:`Cache` object managing LeanDojo's caching of traced repos (see :ref:`caching`).
 """

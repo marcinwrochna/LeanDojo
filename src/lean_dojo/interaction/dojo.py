@@ -14,7 +14,7 @@ from .parse_goals import parse_goals, Goal
 from ..utils import to_json_path, working_directory
 from ..data_extraction.trace import get_traced_repo_path
 from ..data_extraction.lean import Theorem, LeanGitRepo, Pos
-from ..constants import TACTIC_CPU_LIMIT, TACTIC_MEMORY_LIMIT
+from ..constants import global_config
 from ..data_extraction.traced_data import TracedFile, get_code_without_comments
 
 
@@ -117,6 +117,8 @@ class Dojo:
         entry: Union[Theorem, Tuple[LeanGitRepo, Path, int]],
         timeout: int = 600,
         additional_imports: List[str] = [],
+        num_lean_threads: int | None = None,
+        lean_memory_limit: str | None = None
     ):
         """Initialize Dojo.
 
@@ -126,6 +128,11 @@ class Dojo:
                 When a tuple of (repo, file_path, line_nb) is given (only supported in Lean 4),
                 the :class:`Dojo` object enables interaction with Lean through commands (similar to a REPL).
             timeout (int): The maximum number of seconds for a single interaction (e.g., tactic).
+            additional_imports (List[str]): Additional imports to be added to the Lean file.
+            num_lean_threads (int | None): Number of Lean threads to use during the interaction,
+                defaults to constants.global_config.num_lean_threads.
+            lean_memory_limit (str | None): Maximum memory to use when interacting with Lean,
+                a string like "32g", defaults to constants.global_config.tactic_memory_limit.
         """
         self.entry = entry
         self.timeout = timeout
@@ -140,6 +147,9 @@ class Dojo:
             assert isinstance(entry, tuple)
             self.repo, self.file_path, _ = entry
             self.file_path = Path(self.file_path)
+
+        self.num_lean_threads = num_lean_threads or global_config.num_lean_threads
+        self.lean_memory_limit = lean_memory_limit or global_config.tactic_memory_limit
 
     @property
     def uses_tactics(self) -> bool:
@@ -171,9 +181,9 @@ class Dojo:
 
         # Run the modified file in a container.
         with working_directory(traced_repo_path):
-            memory_limit = 1024 * int(TACTIC_MEMORY_LIMIT[:-1])
+            memory_limit = 1024 * int(self.lean_memory_limit[:-1])
             modified_path = Path(self.modified_file.name).relative_to(traced_repo_path)
-            cmd = f"lake env lean --threads={TACTIC_CPU_LIMIT} --memory={memory_limit} {modified_path}"
+            cmd = f"lake env lean --threads={self.num_lean_threads} --memory={memory_limit} {modified_path}"
             self.proc = pexpect.spawn(
                 cmd, timeout=self.timeout, maxread=1, encoding="utf-8", echo=False
             )

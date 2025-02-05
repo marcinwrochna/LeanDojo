@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from ray.util.actor_pool import ActorPool
 from typing import Tuple, Union, List, Generator, Optional
 
-from .constants import NUM_WORKERS, TMP_DIR, LEAN4_PACKAGES_DIR, LEAN4_BUILD_DIR
+from .constants import global_config
 
 
 @contextmanager
@@ -36,7 +36,7 @@ def working_directory(
     """
     origin = Path.cwd()
     if path is None:
-        tmp_dir = tempfile.TemporaryDirectory(dir=TMP_DIR)
+        tmp_dir = tempfile.TemporaryDirectory(dir=global_config.tmp_dir or None)
         path = tmp_dir.__enter__()
         is_temporary = True
     else:
@@ -71,7 +71,7 @@ def ray_actor_pool(
     """
     assert not ray.is_initialized()
     ray.init()
-    pool = ActorPool([actor_cls.remote(*args, **kwargs) for _ in range(NUM_WORKERS)])  # type: ignore
+    pool = ActorPool([actor_cls.remote(*args, **kwargs) for _ in range(global_config.n_ray_actors)])  # type: ignore
     try:
         yield pool
     finally:
@@ -222,6 +222,9 @@ def _from_lean_path(root_dir: Path, path: Path, repo, ext: str) -> Path:
     if path.is_absolute():
         path = path.relative_to(root_dir)
 
+    LEAN4_PACKAGES_DIR = global_config.lean4_packages_dir
+    LEAN4_BUILD_DIR = global_config.lean4_build_dir
+
     assert root_dir.name != "lean4"
     if path.is_relative_to(LEAN4_PACKAGES_DIR / "lean4/src/lean/lake"):
         # E.g., "lake-packages/lean4/src/lean/lake/Lake/CLI/Error.lean"
@@ -268,6 +271,9 @@ def to_lean_path(root_dir: Path, path: Path) -> Path:
     else:
         assert path.suffix == ".dep_paths"
         path = path.with_suffix(".lean")
+
+    LEAN4_PACKAGES_DIR = global_config.lean4_packages_dir
+    LEAN4_BUILD_DIR = global_config.lean4_build_dir
 
     assert root_dir.name != "lean4"
     if path == LEAN4_PACKAGES_DIR / "lean4/lib/lean/Lake.lean":

@@ -49,7 +49,7 @@ from .ast import (
     is_potential_premise_lean4,
 )
 from .lean import LeanFile, LeanGitRepo, Theorem, Pos
-from ..constants import NUM_WORKERS, LOAD_USED_PACKAGES_ONLY, LEAN4_PACKAGES_DIR
+from ..constants import global_config
 
 
 @dataclass(frozen=True)
@@ -463,8 +463,8 @@ class TracedFile:
 
     ast: FileNode = field(repr=False)
     """Abstract syntax tree (AST) of the entire :code:`*.lean` file.
-    
-    AST nodes are defined in :ref:`lean_dojo.data_extraction.ast`. 
+
+    AST nodes are defined in :ref:`lean_dojo.data_extraction.ast`.
     """
 
     comments: List[Comment] = field(repr=False)
@@ -473,7 +473,7 @@ class TracedFile:
 
     traced_repo: Optional["TracedRepo"] = field(default=None, repr=False)
     """The traced repo this traced file belongs to.
-    
+
     Note that ``traced_repo`` will become None after the traced file is serialized/deserialized on its own.
     """
 
@@ -726,9 +726,9 @@ class TracedFile:
     def _get_repo_and_relative_path(self) -> Tuple[LeanGitRepo, Path]:
         """Return the repo this file belongs to, as well as the file's path relative to it."""
         assert self.traced_repo is not None
-        if self.path.is_relative_to(LEAN4_PACKAGES_DIR):
+        if self.path.is_relative_to(global_config.lean4_packages_dir):
             # The theorem belongs to one of the dependencies.
-            p = self.path.relative_to(LEAN4_PACKAGES_DIR)
+            p = self.path.relative_to(global_config.lean4_packages_dir)
             name = p.parts[0]
             repo = self.traced_repo.dependencies[name]
             return repo, p.relative_to(name)
@@ -827,7 +827,7 @@ class TracedFile:
             if self.root_dir.name == "lean4":
                 deps.add(("Init", init_lean))
             else:
-                deps.add(("Init", LEAN4_PACKAGES_DIR / "lean4" / init_lean))
+                deps.add(("Init", global_config.lean4_packages_dir / "lean4" / init_lean))
 
         def _callback(node: ModuleImportNode, _) -> None:
             if node.module is not None and node.path is not None:
@@ -1020,7 +1020,7 @@ class TracedRepo:
 
     traced_files_graph: Optional[nx.DiGraph] = field(repr=False)
     """Dependency graph between files in the repo.
-    
+
     The graph is a DAG, and there is an edge from file :file:`X` to file :file:`Y`
     if and only if :file:`X` imports :file:`Y`
     """
@@ -1072,7 +1072,7 @@ class TracedRepo:
         }
 
         if self.traced_files_graph is not None:
-            if not LOAD_USED_PACKAGES_ONLY:
+            if not global_config.load_used_packages_only:
                 assert len(json_files) == self.traced_files_graph.number_of_nodes()
 
             for path_str, tf_node in self.traced_files_graph.nodes.items():
@@ -1112,10 +1112,10 @@ class TracedRepo:
         json_paths = list(root_dir.glob("**/*.ast.json"))
         random.shuffle(json_paths)
         logger.debug(
-            f"Parsing {len(json_paths)} *.ast.json files in {root_dir} with {NUM_WORKERS} workers"
+            f"Parsing {len(json_paths)} *.ast.json files in {root_dir} with {global_config.num_ray_actors} workers"
         )
 
-        if NUM_WORKERS <= 1:
+        if global_config.num_ray_actors <= 1:
             traced_files = [
                 TracedFile.from_traced_file(root_dir, path, repo)
                 for path in tqdm(json_paths)
@@ -1156,9 +1156,9 @@ class TracedRepo:
         """Save all traced files in the repo to the disk as :file:`*.trace.xml` files."""
         num_traced_files = len(self.traced_files)
         logger.debug(
-            f"Saving {num_traced_files} traced XML files to {self.root_dir} with {NUM_WORKERS} workers"
+            f"Saving {num_traced_files} traced XML files to {self.root_dir} with {global_config.num_ray_actors} workers"
         )
-        if NUM_WORKERS <= 1:
+        if global_config.num_ray_actors <= 1:
             for tf in tqdm(self.traced_files, total=num_traced_files):
                 _save_xml_to_disk(tf)
         else:
@@ -1185,19 +1185,19 @@ class TracedRepo:
 
         xml_paths = list(root_dir.glob("**/*.trace.xml"))
         logger.debug(
-            f"Loading {len(xml_paths)} traced XML files from {root_dir} with {NUM_WORKERS} workers"
+            f"Loading {len(xml_paths)} traced XML files from {root_dir} with {global_config.num_ray_actors} workers"
         )
 
         # Start from files in the target repo as seeds.
         # Only load dependency files that are actually used.
-        if LOAD_USED_PACKAGES_ONLY:
+        if global_config.load_used_packages_only:
             xml_paths = [
                 p
                 for p in xml_paths
                 if not "lake-packages/" in str(p) and not ".lake/packages" in str(p)
             ]
 
-        if NUM_WORKERS <= 1:
+        if global_config.num_ray_actors <= 1:
             traced_files = [
                 TracedFile.from_xml(root_dir, path, repo) for path in tqdm(xml_paths)
             ]
@@ -1238,5 +1238,5 @@ class TracedRepo:
             path = Path(thm.repo.name) / thm.file_path
         else:
             assert thm.repo in self.dependencies.values()
-            path = Path(self.name) / LEAN4_PACKAGES_DIR / thm.repo.name / thm.file_path
+            path = Path(self.name) / global_config.lean4_packages_dir / thm.repo.name / thm.file_path
         return self.get_traced_file(path).get_traced_theorem(thm.full_name)

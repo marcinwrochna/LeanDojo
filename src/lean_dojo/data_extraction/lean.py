@@ -1,4 +1,4 @@
-"""This module define classes for repos, files, and theorems in Lean. 
+"""This module define classes for repos, files, and theorems in Lean.
 Objects of these classes contain only surface information, without extracting any trace.
 """
 
@@ -29,11 +29,11 @@ from ..utils import (
     is_git_repo,
 )
 from .cache import cache as repo_cache
-from ..constants import TMP_DIR, LEAN4_URL
+from ..constants import global_config
 
 
 GITHUB_ACCESS_TOKEN = os.getenv("GITHUB_ACCESS_TOKEN", None)
-"""GiHub personal access token is optional. 
+"""GiHub personal access token is optional.
 If provided, it can increase the rate limit for GitHub API calls.
 """
 
@@ -149,7 +149,7 @@ def url_to_repo(
     url = normalize_url(url)
     backoff = 1
     if tmp_dir is None:
-        tmp_dir = (TMP_DIR or Path("/tmp")) / next(tempfile._get_candidate_names())  # type: ignore
+        tmp_dir = (global_config.tmp_dir or Path("/tmp")) / next(tempfile._get_candidate_names())  # type: ignore
     repo_type = repo_type or get_repo_type(url)
     assert repo_type is not None, f"Invalid url {url}"
     while True:
@@ -263,7 +263,7 @@ class LeanFile:
 
     path: Path
     """Relative path w.r.t. ``root_dir``
-    
+
     E.g., :file:`lean-example/src/example.lean`
     """
 
@@ -523,7 +523,7 @@ class LeanGitRepo:
 
     commit: str
     """The repo's commit hash.
-    
+
     You can also use tags such as ``v3.5.0``. They will be converted to commit hashes.
     """
 
@@ -601,7 +601,7 @@ class LeanGitRepo:
 
     @property
     def is_lean4(self) -> bool:
-        return self.url == LEAN4_URL
+        return self.url == global_config.lean4_url
 
     @property
     def commit_url(self) -> str:

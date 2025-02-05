@@ -18,7 +18,7 @@ from typing import Union, Optional, List, Generator
 
 from .cache import cache
 from .lean import LeanGitRepo
-from ..constants import NUM_PROCS
+from ..constants import global_config
 from .traced_data import TracedRepo
 from ..utils import working_directory, execute
 
@@ -155,7 +155,7 @@ def _trace(repo: LeanGitRepo, build_deps: bool) -> None:
         if build_deps:
             dirs_to_monitor.append(packages_path)
         with launch_progressbar(dirs_to_monitor):
-            cmd = f"lake env lean --threads {NUM_PROCS} --run ExtractData.lean"
+            cmd = f"lake env lean --threads {global_config.num_lean_threads} --run ExtractData.lean"
             if not build_deps:
                 cmd += " noDeps"
             execute(cmd, capture_output=True)
