@@ -115,10 +115,11 @@ class Dojo:
     def __init__(
         self,
         entry: Union[Theorem, Tuple[LeanGitRepo, Path, int]],
-        timeout: int = 600,
+        timeout: float = 600,
         additional_imports: List[str] = [],
         num_lean_threads: int | None = None,
-        lean_memory_limit: str | None = None
+        lean_memory_limit: str | None = None,
+        init_timeout: float | None = -1
     ):
         """Initialize Dojo.
 
@@ -127,15 +128,19 @@ class Dojo:
                 the :class:`Dojo` object enables interaction with the theorem through tactics.
                 When a tuple of (repo, file_path, line_nb) is given (only supported in Lean 4),
                 the :class:`Dojo` object enables interaction with Lean through commands (similar to a REPL).
-            timeout (int): The maximum number of seconds for a single interaction (e.g., tactic).
+            timeout (float): The maximum number of seconds for a single interaction (e.g., tactic).
+                This can also be overriden in `run_tac` and `run_cmd` (None means no timeout, -1 means keep unchanged).
             additional_imports (List[str]): Additional imports to be added to the Lean file.
             num_lean_threads (int | None): Number of Lean threads to use during the interaction,
                 defaults to constants.global_config.num_lean_threads.
             lean_memory_limit (str | None): Maximum memory to use when interacting with Lean,
                 a string like "32g", defaults to constants.global_config.tactic_memory_limit.
+            init_timeout (float | None): The maximum number of seconds for the initialization of the Dojo.
+                (defaults to -1, meaning the same as `timeout`).
         """
         self.entry = entry
         self.timeout = timeout
+        self.init_timeout = init_timeout
         self.additional_imports = additional_imports
 
         if self.uses_tactics:
@@ -190,7 +195,7 @@ class Dojo:
 
         # Get the initial tactic state.
         try:
-            res_json, msg = self._read_next_line()
+            res_json, msg = self._read_next_line(timeout=self.init_timeout)
             res = json.loads(res_json)
         except Exception as ex:
             if traced_file.has_prelude:
@@ -327,7 +332,7 @@ class Dojo:
 
         return str(modified_code)
 
-    def run_tac(self, state: TacticState, tactic: str) -> TacticResult:
+    def run_tac(self, state: TacticState, tactic: str, timeout: float | None = -1) -> TacticResult:
         if not isinstance(state, TacticState):
             raise RuntimeError(
                 f"Attempting to run a tactic on an invalid state {state}."
@@ -336,7 +341,7 @@ class Dojo:
 
         tsid = state.id
         req = json.dumps({"sid": tsid, "cmd": tactic}, ensure_ascii=False)
-        res = self._submit_request(req)
+        res = self._submit_request(req, timeout=timeout)
 
         if res["error"] is not None:
             if "proof contains `sorry`" in res["error"]:
@@ -354,7 +359,7 @@ class Dojo:
                 res["message"],
             )
 
-    def run_cmd(self, state: CommandState, command: str) -> CommandResult:
+    def run_cmd(self, state: CommandState, command: str, timeout: float | None = -1) -> CommandResult:
         if not isinstance(state, CommandState):
             raise RuntimeError(
                 f"Attempting to run a command on an invalid state {state}."
@@ -363,14 +368,14 @@ class Dojo:
 
         csid = state.id
         req = json.dumps({"sid": csid, "cmd": command}, ensure_ascii=False)
-        res = self._submit_request(req)
+        res = self._submit_request(req, timeout=timeout)
 
         if res["error"] is not None:
             return LeanError(res["error"].strip())
         else:
             return CommandState(res["sid"], res["message"])
 
-    def _submit_request(self, req: str) -> Dict[str, Any]:
+    def _submit_request(self, req: str, timeout: float | None = -1) -> Dict[str, Any]:
         """Submit a request to Lean and get the response.
 
         Args:
@@ -386,7 +391,7 @@ class Dojo:
         logger.debug(req)
         self.proc.sendline(req)
         try:
-            res, msg = self._read_next_line()
+            res, msg = self._read_next_line(timeout=timeout)
         except EOFError as e:
             raise DojoCrashError(f"EOF; lean says '''{e.args[0]}'''") from None
         try:
@@ -407,7 +412,7 @@ class Dojo:
         else:
             raise DojoCrashError(f"Unexpected exit code: {exit_code}")
 
-    def _read_next_line(self) -> Tuple[str, str]:
+    def _read_next_line(self, timeout: float | None = -1) -> Tuple[str, str]:
         """Read the next line from `self.proc`.
 
         Raises:
@@ -422,7 +427,7 @@ class Dojo:
         msg: List[str] = []
         while True:
             try:
-                index = self.proc.expect(["\n", f"{_REPL_PROMPT}.*?\n"])
+                index = self.proc.expect(["\n", f"{_REPL_PROMPT}.*?\n"], timeout=timeout)
                 if index == 0:
                     if self.proc.before == "":
                         lean_msg = "\n".join(msg) + self.proc.before
