@@ -198,11 +198,11 @@ class Dojo:
                     "Currently LeanDojo does not support interacting with proofs in prelude files."
                 )
             elif isinstance(ex, EOFError):
-                raise DojoInitError("Unexpected EOF")
+                raise DojoInitError(f"EOF; lean says: '''{ex.args[0]}'''") from ex
             elif isinstance(ex, DojoTacticTimeoutError):
-                raise DojoInitError("Timeout during initialization")
+                raise DojoInitError(f"Timeout during initialization; lean says: '''{ex.args[0]}'''") from ex
             else:
-                raise ex
+                raise
 
         assert res["error"] is None
 
@@ -388,11 +388,11 @@ class Dojo:
         try:
             res, msg = self._read_next_line()
         except EOFError as e:
-            raise DojoCrashError(f"Unexpected EOF; message='''{e.args[0]}'''")
+            raise DojoCrashError(f"EOF; lean says '''{e.args[0]}'''") from None
         try:
             result: Dict[str, Any] = json.loads(res)
-        except json.decoder.JSONDecodeError:
-            raise DojoCrashError(f"Invalid JSON: {res}")
+        except json.decoder.JSONDecodeError as e:
+            raise DojoCrashError(f"Invalid JSON: {res}") from e
 
         result["message"] = msg
         return result
@@ -425,7 +425,8 @@ class Dojo:
                 index = self.proc.expect(["\n", f"{_REPL_PROMPT}.*?\n"])
                 if index == 0:
                     if self.proc.before == "":
-                        raise EOFError("\n".join(msg) + self.proc.before)
+                        lean_msg = "\n".join(msg) + self.proc.before
+                        raise EOFError(lean_msg)
                     else:
                         msg.append(self.proc.before.strip())
                         continue
@@ -433,8 +434,10 @@ class Dojo:
                 res = self.proc.match.string[len(_REPL_PROMPT) :].strip()
                 return res, "\n".join(msg) + self.proc.before
             except pexpect.EOF:
-                raise EOFError("\n".join(msg) + self.proc.before)
+                lean_msg = "\n".join(msg) + self.proc.before
+                raise EOFError(lean_msg) from None
             except pexpect.TIMEOUT:
-                logger.debug(f"Tactic timed out")
+                logger.debug("Tactic timed out")
                 self.has_timedout = True
-                raise DojoTacticTimeoutError()
+                lean_msg = "\n".join(msg) + self.proc.before
+                raise DojoTacticTimeoutError(lean_msg) from None
