@@ -657,7 +657,7 @@ class LeanGitRepo:
             else {"content": (Path(path) / "lean-toolchain").open().read()}
         )
         commit = get_lean4_commit_from_config(toolchain)
-        deps = {"lean4": LeanGitRepo(LEAN4_URL, commit)}
+        deps = {"lean4": LeanGitRepo(global_config.lean4_url, commit)}
 
         try:
             lake_manifest = (
