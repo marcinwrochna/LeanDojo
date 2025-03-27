@@ -1,38 +1,32 @@
-"""Utility functions used internally by LeanDojo.
-"""
-
-import re
-import os
-import ray
-import time
-import urllib
-import typing
 import hashlib
-import tempfile
+import os
+import re
 import subprocess
-from pathlib import Path
-from loguru import logger
-from functools import cache
+import tempfile
+import typing
+from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
+from typing import Any
+
+import ray
+from loguru import logger
 from ray.util.actor_pool import ActorPool
-from typing import Tuple, Union, List, Generator, Optional
 
 from .constants import global_config
 
 
 @contextmanager
-def working_directory(
-    path: Optional[Union[str, Path]] = None
-) -> Generator[Path, None, None]:
-    """Context manager setting the current working directory (CWD) to ``path`` (or a temporary directory if ``path`` is None).
+def working_directory(path: str | Path | None = None) -> Iterator[Path]:
+    """
+    Context manager setting the current working directory (CWD) to `path`.
 
     The original CWD is restored after the context manager exits.
 
     Args:
-        path (Optional[Union[str, Path]], optional): The desired CWD. Defaults to None.
+        path: The desired CWD. Defaults to None, which means a temporary directory.
 
-    Yields:
-        Generator[Path, None, None]: A ``Path`` object representing the CWD.
+    Yields: a `Path` object representing the CWD.
     """
     origin = Path.cwd()
     if path is None:
@@ -56,9 +50,7 @@ def working_directory(
 
 
 @contextmanager
-def ray_actor_pool(
-    actor_cls: type, *args, **kwargs
-) -> Generator[ActorPool, None, None]:
+def ray_actor_pool(actor_cls: type, *args: Any, **kwargs: Any) -> Iterator[ActorPool]:
     """Create a pool of Ray Actors of class ``actor_cls``.
 
     Args:
@@ -66,8 +58,7 @@ def ray_actor_pool(
         *args: Position arguments passed to ``actor_cls``.
         **kwargs: Keyword arguments passed to ``actor_cls``.
 
-    Yields:
-        Generator[ActorPool, None, None]: A :class:`ray.util.actor_pool.ActorPool` object.
+    Yields: A :class:`ray.util.actor_pool.ActorPool` object.
     """
     assert not ray.is_initialized()
     ray.init()
@@ -79,7 +70,7 @@ def ray_actor_pool(
 
 
 @contextmanager
-def report_critical_failure(msg: str) -> Generator[None, None, None]:
+def report_critical_failure(msg: str) -> Iterator[None]:
     """Context manager logging ``msg`` in case of any exception.
 
     Args:
@@ -95,31 +86,26 @@ def report_critical_failure(msg: str) -> Generator[None, None, None]:
         raise ex
 
 
-def execute(
-    cmd: Union[str, List[str]], capture_output: bool = False
-) -> Optional[Tuple[str, str]]:
+def execute(cmd: str | list[str], capture_output: bool = False) -> tuple[str, str] | None:
     """Execute the shell command ``cmd`` and optionally return its output.
 
     Args:
-        cmd (Union[str, List[str]]): The shell command to execute.
-        capture_output (bool, optional): Whether to capture and return the output. Defaults to False.
+        cmd: The shell command to execute.
+        capture_output: Whether to capture and return the output. Defaults to False.
 
-    Returns:
-        Optional[Tuple[str, str]]: The command's output, including stdout and stderr (None if ``capture_output == False``).
+    Returns: (stdout, stderr) if capture_output is True else None.
     """
     logger.debug(cmd)
     try:
-        res = subprocess.run(cmd, shell=True, capture_output=capture_output, check=True)
+        res = subprocess.run(cmd, shell=True, capture_output=capture_output, check=True, encoding="utf-8")
     except subprocess.CalledProcessError as ex:
         if capture_output:
-            logger.info(ex.stdout.decode())
-            logger.error(ex.stderr.decode())
+            logger.info(ex.stdout)
+            logger.error(ex.stderr)
         raise ex
     if not capture_output:
         return None
-    output = res.stdout.decode()
-    error = res.stderr.decode()
-    return output, error
+    return res.stdout, res.stderr
 
 
 def compute_md5(path: Path) -> str:
@@ -146,78 +132,36 @@ def camel_case(s: str) -> str:
 
 def is_optional_type(tp: type) -> bool:
     """Test if ``tp`` is Optional[X]."""
-    if typing.get_origin(tp) != Union:
+    if typing.get_origin(tp) != typing.Union:
         return False
     args = typing.get_args(tp)
-    return len(args) == 2 and args[1] == type(None)
+    return args[-1] is type(None)
 
 
 def remove_optional_type(tp: type) -> type:
     """Given Optional[X], return X."""
-    assert typing.get_origin(tp) == Union
-    args = typing.get_args(tp)
-    if len(args) == 2 and args[1] == type(None):
-        return args[0]
+    assert typing.get_origin(tp) == typing.Union
+    args: tuple[type, ...] = typing.get_args(tp)
+    if args[-1] is type(None):
+        if len(args) == 2:
+            return args[0]
+        else:
+            return typing.Union[args[:-1]]  # type: ignore  # noqa: UP007
     else:
         raise ValueError(f"{tp} is not Optional")
 
 
-@cache
-def read_url(url: str, num_retries: int = 2) -> str:
-    """Read the contents of the URL ``url``. Retry if failed"""
-    backoff = 1
-    while True:
-        try:
-            request = urllib.request.Request(url)  # type: ignore
-            gh_token = os.getenv("GITHUB_ACCESS_TOKEN")
-            if gh_token is not None:
-                request.add_header("Authorization", f"token {gh_token}")
-            with urllib.request.urlopen(request) as f:  # type: ignore
-                return f.read().decode()
-        except Exception as ex:
-            if num_retries <= 0:
-                raise ex
-            num_retries -= 1
-            logger.debug(f"Request to {url} failed. Retrying...")
-            time.sleep(backoff)
-            backoff *= 2
-
-
-@cache
-def url_exists(url: str) -> bool:
-    """Return True if the URL ``url`` exists, using the GITHUB_ACCESS_TOKEN for authentication if provided."""
-    try:
-        request = urllib.request.Request(url)  # type: ignore
-        gh_token = os.getenv("GITHUB_ACCESS_TOKEN")
-        if gh_token is not None:
-            request.add_header("Authorization", f"token {gh_token}")
-        with urllib.request.urlopen(request) as _:  # type: ignore
-            return True
-    except urllib.error.HTTPError:  # type: ignore
-        return False
-
-
-def parse_int_list(s: str) -> List[int]:
+def parse_int_list(s: str) -> list[int]:
     assert s.startswith("[") and s.endswith("]")
     return [int(_) for _ in s[1:-1].split(",") if _ != ""]
 
 
-def parse_str_list(s: str) -> List[str]:
+def parse_str_list(s: str) -> list[str]:
     assert s.startswith("[") and s.endswith("]")
     return [_.strip()[1:-1] for _ in s[1:-1].split(",") if _ != ""]
 
 
-@cache
-def is_git_repo(path: Path) -> bool:
-    """Check if ``path`` is a Git repo."""
-    with working_directory(path):
-        return (
-            os.system("git rev-parse --is-inside-work-tree 1>/dev/null 2>/dev/null")
-            == 0
-        )
-
-
-def _from_lean_path(root_dir: Path, path: Path, repo, ext: str) -> Path:
+def _from_lean_path(root_dir: Path, path: Path, _repo: Any, ext: str) -> Path:
     assert path.suffix == ".lean"
     if path.is_absolute():
         path = path.relative_to(root_dir)
@@ -238,27 +182,21 @@ def _from_lean_path(root_dir: Path, path: Path, repo, ext: str) -> Path:
         # E.g., "lake-packages/std/Std.lean"
         p = path.relative_to(LEAN4_PACKAGES_DIR).with_suffix(ext)
         repo_name = p.parts[0]
-        return (
-            LEAN4_PACKAGES_DIR
-            / repo_name
-            / LEAN4_BUILD_DIR
-            / "ir"
-            / p.relative_to(repo_name)
-        )
+        return LEAN4_PACKAGES_DIR / repo_name / LEAN4_BUILD_DIR / "ir" / p.relative_to(repo_name)
     else:
         # E.g., "Mathlib/LinearAlgebra/Basics.lean"
         return LEAN4_BUILD_DIR / "ir" / path.with_suffix(ext)
 
 
-def to_xml_path(root_dir: Path, path: Path, repo) -> Path:
+def to_xml_path(root_dir: Path, path: Path, repo: Any) -> Path:
     return _from_lean_path(root_dir, path, repo, ext=".trace.xml")
 
 
-def to_dep_path(root_dir: Path, path: Path, repo) -> Path:
+def to_dep_path(root_dir: Path, path: Path, repo: Any) -> Path:
     return _from_lean_path(root_dir, path, repo, ext=".dep_paths")
 
 
-def to_json_path(root_dir: Path, path: Path, repo) -> Path:
+def to_json_path(root_dir: Path, path: Path, repo: Any) -> Path:
     return _from_lean_path(root_dir, path, repo, ext=".ast.json")
 
 
@@ -292,11 +230,7 @@ def to_lean_path(root_dir: Path, path: Path) -> Path:
         # E.g., "lake-packages/std/build/ir/Std.lean"
         p = path.relative_to(LEAN4_PACKAGES_DIR)
         repo_name = p.parts[0]
-        return (
-            LEAN4_PACKAGES_DIR
-            / repo_name
-            / p.relative_to(Path(repo_name) / LEAN4_BUILD_DIR / "ir")
-        )
+        return LEAN4_PACKAGES_DIR / repo_name / p.relative_to(Path(repo_name) / LEAN4_BUILD_DIR / "ir")
     else:
         # E.g., ".lake/build/ir/Mathlib/LinearAlgebra/Basics.lean" or "build/ir/Mathlib/LinearAlgebra/Basics.lean"
         assert path.is_relative_to(LEAN4_BUILD_DIR / "ir"), path

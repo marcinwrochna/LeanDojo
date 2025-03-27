@@ -3,6 +3,7 @@ To estimate the time for tracing a repo, a good rule of thumb is 1.5x the time f
 A repo has to be traced only once, and the traced repo will be stored in a cache for fast access in the future.
 """
 
+import subprocess
 import os
 import re
 import shutil
@@ -14,23 +15,22 @@ from time import sleep, monotonic
 from multiprocessing import Process
 from contextlib import contextmanager
 from subprocess import CalledProcessError
-from typing import Union, Optional, List, Generator
+from typing import Generator
 
-from .cache import cache
 from .lean import LeanGitRepo
 from ..constants import global_config
 from .traced_data import TracedRepo
 from ..utils import working_directory, execute
 
 
-LEAN4_DATA_EXTRACTOR_PATH = Path(__file__).with_name("ExtractData.lean")
+LEAN4_DATA_EXTRACTOR_PATH = Path(__file__).parent / "ExtractData.lean"
 LEAN4_REPL_PATH = Path(__file__).parent.parent / "interaction" / "Lean4Repl.lean"
 assert LEAN4_DATA_EXTRACTOR_PATH.exists() and LEAN4_REPL_PATH.exists()
 
 _PROGRESSBAR_UPDATE_INTERNAL = 5
 
 
-def _monitor(paths: List[Path], num_total: int) -> None:
+def _monitor(paths: list[Path], num_total: int) -> None:
     with tqdm(total=num_total) as pbar:
         while True:
             time_start = monotonic()
@@ -38,7 +38,7 @@ def _monitor(paths: List[Path], num_total: int) -> None:
                 num_done = len(
                     list(
                         itertools.chain.from_iterable(
-                            p.glob(f"**/*.ast.json") for p in paths
+                            p.glob("**/*.ast.json") for p in paths
                         )
                     )
                 )
@@ -54,7 +54,7 @@ def _monitor(paths: List[Path], num_total: int) -> None:
 
 
 @contextmanager
-def launch_progressbar(paths: List[Path]) -> Generator[None, None, None]:
+def launch_progressbar(paths: list[Path]) -> Generator[None, None, None]:
     """Launch an async progressbar to monitor the progress of tracing the repo."""
     paths = [Path(p) for p in paths]
     olean_files = list(
@@ -67,11 +67,12 @@ def launch_progressbar(paths: List[Path]) -> Generator[None, None, None]:
     p.kill()
 
 
-def get_lean_version() -> str:
-    """Get the version of Lean."""
-    output = execute("lean --version", capture_output=True)[0].strip()
-    m = re.match(r"Lean \(version (?P<version>\S+?),", output)
-    return m["version"]  # type: ignore
+def get_lean_version(dir: Path) -> str:
+    """Get the version of Lean, like '4.18.0-rc1'."""
+    p = subprocess.run(["lean", "--version"], capture_output=True, check=True, encoding="utf-8", cwd=dir)
+    m = re.match(r"Lean \(version (?P<version>\S+?),", p.stdout.strip())
+    assert m and m["version"]
+    return m["version"]
 
 
 def is_new_version(v: str) -> bool:
@@ -140,8 +141,8 @@ def _trace(repo: LeanGitRepo, build_deps: bool) -> None:
         execute("lake build")
 
         # Copy the Lean 4 stdlib into the path of packages.
-        lean_prefix = execute(f"lean --print-prefix", capture_output=True)[0].strip()
-        if is_new_version(get_lean_version()):
+        lean_prefix = execute("lean --print-prefix", capture_output=True)[0].strip()
+        if is_new_version(get_lean_version(Path())):
             packages_path = Path(".lake/packages")
             build_path = Path(".lake/build")
         else:
@@ -182,14 +183,14 @@ def _trace(repo: LeanGitRepo, build_deps: bool) -> None:
             execute("lake build Lean4Repl")
         except CalledProcessError:
             logger.warning(
-                f"Failed to build Lean4Repl. You may run into issues when interacting with the repo."
+                "Failed to build Lean4Repl. You may run into issues when interacting with the repo."
             )
 
 
 def is_available_in_cache(repo: LeanGitRepo) -> bool:
     """Check if ``repo`` has a traced repo available in the cache (including the remote cache)."""
     rel_cache_dir = repo.get_cache_dirname() / repo.name
-    return cache.get(rel_cache_dir) is not None
+    return repo_cache.get(rel_cache_dir) is not None
 
 
 def get_traced_repo_path(repo: LeanGitRepo, build_deps: bool = True) -> Path:
@@ -205,7 +206,7 @@ def get_traced_repo_path(repo: LeanGitRepo, build_deps: bool = True) -> Path:
         Path: The path of the traced repo in the cache, e.g. :file:`/home/kaiyu/.cache/lean_dojo/leanprover-community-mathlib-2196ab363eb097c008d4497125e0dde23fb36db2`
     """
     rel_cache_dir = repo.get_cache_dirname() / repo.name
-    path = cache.get(rel_cache_dir)
+    path = repo_cache.get(rel_cache_dir)
     if path is None:
         logger.info(f"Tracing {repo}")
         with working_directory() as tmp_dir:
@@ -214,7 +215,7 @@ def get_traced_repo_path(repo: LeanGitRepo, build_deps: bool = True) -> Path:
             src_dir = tmp_dir / repo.name
             traced_repo = TracedRepo.from_traced_files(src_dir, build_deps)
             traced_repo.save_to_disk()
-            path = cache.store(src_dir, rel_cache_dir)
+            path = repo_cache.store(src_dir, rel_cache_dir)
     else:
         logger.debug("The traced repo is available in the cache.")
     return path
@@ -222,7 +223,7 @@ def get_traced_repo_path(repo: LeanGitRepo, build_deps: bool = True) -> Path:
 
 def trace(
     repo: LeanGitRepo,
-    dst_dir: Optional[Union[str, Path]] = None,
+    dst_dir: str | Path | None = None,
     build_deps: bool = True,
 ) -> TracedRepo:
     """Trace a repo (and its dependencies), saving the results to ``dst_dir``.

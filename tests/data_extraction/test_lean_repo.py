@@ -7,7 +7,7 @@ from lean_dojo.data_extraction.lean import (
     get_repo_type,
     url_to_repo,
     get_latest_commit,
-    is_commit_hash,
+    _is_commit_hash,
     GITHUB,
     RepoType,
 )
@@ -19,7 +19,7 @@ def test_github_type(lean4_example_url, example_commit_hash):
 
     ## get_latest_commit
     gh_cm_hash = get_latest_commit(lean4_example_url)
-    assert is_commit_hash(gh_cm_hash)
+    assert _is_commit_hash(gh_cm_hash)
 
     ## url_to_repo & get_repo_type
     github_repo = url_to_repo(lean4_example_url)
