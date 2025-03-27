@@ -97,6 +97,7 @@ class Node:
 
 
 def _parse_pos(info: dict[str, Any], lean_file: LeanFile) -> tuple[Pos, Pos] | None:
+    # See: https://github.com/leanprover/lean4/blob/e9fda1a3e4df006efb2f54fc18b42718eee1df25/src/Init/Prelude.lean#L4243
     if "synthetic" in info and not info["synthetic"]["canonical"]:
         return None
 
